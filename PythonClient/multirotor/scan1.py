@@ -22,7 +22,7 @@ import errno
 
 class LidarTest:
 
-    def __init__(self, bagfile, lidar_out):
+    def __init__(self, bagfile, lidar_out, frames):
 
         self.client = airsim.MultirotorClient()
         self.client.confirmConnection()
@@ -32,6 +32,7 @@ class LidarTest:
 
         self.bag = rosbag.Bag(bagfile, 'w')
         self.lidar_out = lidar_out
+        self.frames = frames 
 
         if (lidar_out != ''):
             try:
@@ -60,7 +61,7 @@ class LidarTest:
         #                airsim.DrivetrainType.ForwardOnly, airsim.YawMode(False,0), 20, 1).join()
         i = 0
         print("capture start")
-        while(i < 50):
+        while(i < self.frames):
             
             self.capture_frame(i)
             i += 1
@@ -69,8 +70,7 @@ class LidarTest:
         print("capturing frame " + str(i))
 
         self.capture_tf()
-        self.capture_tf2()
-        self.capture_lidar(str(i))
+        self.capture_lidar(i)
         self.capture_image()
         self.capture_imu()
         self.capture_gps()
@@ -105,30 +105,6 @@ class LidarTest:
         tf_msg.transforms.append(t)
 
         self.bag.write("/tf", tf_msg, t.header.stamp)
- 
-    def capture_tf2(self):
-        state = self.client.getMultirotorState()
-
-        tf_msg = TFMessage()
-
-        t = TransformStamped()
-
-        t.header.frame_id = "drone"
-        t.child_frame_id = "map"
-        t.header.stamp = rospy.Time.from_sec(float(state.timestamp)/1000000000)
-
-        t.transform.translation.x = state.kinematics_estimated.position.x_val
-        t.transform.translation.y = state.kinematics_estimated.position.y_val
-        t.transform.translation.z = state.kinematics_estimated.position.z_val
-
-        t.transform.rotation.x = state.kinematics_estimated.orientation.x_val
-        t.transform.rotation.y = state.kinematics_estimated.orientation.y_val
-        t.transform.rotation.z = state.kinematics_estimated.orientation.z_val
-        t.transform.rotation.w = state.kinematics_estimated.orientation.w_val
-
-        tf_msg.transforms.append(t)
-
-        self.bag.write("/tf", tf_msg, t.header.stamp)
 
     def capture_gps(self):
         gps_data = self.client.getGpsData()
@@ -146,14 +122,12 @@ class LidarTest:
         gps_msg.longitude = gps_data.gnss.geo_point.longitude
         gps_msg.header.frame_id = "drone"
         gps_msg.header.stamp = rospy.Time.from_sec(float(gps_data.time_stamp)/1000000000)
-        self.bag.write("/gps", gps_msg, gps_msg.header.stamp)
+        self.bag.write("/fix", gps_msg, gps_msg.header.stamp)
 
 
     def capture_imu(self):
         imu_data = self.client.getImuData()
-        s = pprint.pformat(imu_data)
-        #print("imu_data: %s" % s)
-
+        
         imu_msg = Imu()
         imu_msg.header.frame_id = "drone"
         imu_msg.header.stamp = rospy.Time.from_sec(float(imu_data.time_stamp)/1000000000)
@@ -167,7 +141,7 @@ class LidarTest:
         imu_msg.angular_velocity.x = imu_data.angular_velocity.x_val
         imu_msg.angular_velocity.y = imu_data.angular_velocity.y_val
         imu_msg.angular_velocity.z = imu_data.angular_velocity.z_val
-        self.bag.write("/imu", imu_msg, imu_msg.header.stamp)
+        self.bag.write("/imu/data", imu_msg, imu_msg.header.stamp)
 
     def capture_lidar(self, frame):
         self.client.hoverAsync().join()
@@ -182,8 +156,8 @@ class LidarTest:
                 #print("\t\tlidar position: %s" % (pprint.pformat(lidarData.pose.position)))
                 #print("\t\tlidar orientation: %s" % (pprint.pformat(lidarData.pose.orientation)))
                 if (self.lidar_out != ''):
-                    numpy.savetxt(self.lidar_out + '/' + frame + '.xyz', points, fmt='%10.4f', delimiter=' ')
-            time.sleep(.1)
+                    numpy.savetxt(self.lidar_out + '/' + str(frame) + '.xyz', points, fmt='%10.4f', delimiter=' ')
+            time.sleep(.2)
 
     def parse_lidarData(self, data):
        # print("\t time_stamp: %d" % (data.time_stamp))
@@ -214,19 +188,16 @@ class LidarTest:
         image.format = "png"
         image.header.frame_id = "drone"
         image.data = image_data
-        #image.height = h 
-        #image.width = w
-
         self.bag.write('/camera', image, image.header.stamp)
 
     def stop(self):
         self.bag.close()
         airsim.wait_key('Press any key to reset to original state')
 
-        self.client.armDisarm(False)
+        #self.client.armDisarm(False)
         self.client.reset()
 
-        self.client.enableApiControl(False)
+        #self.client.enableApiControl(False)
         print("Done!\n")
 
 # main
@@ -238,11 +209,13 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-bag', type=str, default="output.bag")
 
+    arg_parser.add_argument('-f', type=int, default=50)
+
     arg_parser.add_argument('-lidar', type=str, default="")
 
     args = arg_parser.parse_args(args)    
 
-    lidarTest = LidarTest(args.bag, args.lidar)
+    lidarTest = LidarTest(args.bag, args.lidar, args.f)
     try:
         lidarTest.execute()
     finally:
